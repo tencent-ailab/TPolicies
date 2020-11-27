@@ -1,0 +1,12 @@
+.idea/
+TPolicies.egg-info/
+tpolicies/__pycache__/
+tpolicies/transformers/__pycache__/
+tpolicies/utils/__pycache__/
+*.ckpt
+tpolicies/convnet/__pycache__/
+
+__pycache__
+*.pyc
+*.json
+.DS_Store
