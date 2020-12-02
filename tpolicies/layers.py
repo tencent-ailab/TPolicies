@@ -13,6 +13,7 @@ from tpolicies.ops import INF, cat_sample_from_logits, ortho_init
 from tpolicies.ops import one_step_lstm_op
 from tpolicies.utils.distributions import CategoricalPdType, BernoulliPdType
 from tpolicies.utils.distributions import MaskSeqCategoricalPdType
+from tpolicies.utils.distributions import DiagGaussianPdType
 
 
 @add_arg_scope
@@ -1443,6 +1444,8 @@ def to_action_head(inputs_logits, pdtype_cls, temperature=1.0,
   elif pdtype_cls == MaskSeqCategoricalPdType:
     pdtype = pdtype_cls(nseq=nseq, ncat=n_actions, mask=mask, labels=labels)
     inputs_logits = tf.reshape(inputs_logits, shape=(-1, nseq*n_actions))
+  elif pdtype_cls == DiagGaussianPdType:
+    pdtype = pdtype_cls(size=int(n_actions//2))
   else:
     raise NotImplemented('Unknown pdtype_cls {}'.format(pdtype_cls))
 

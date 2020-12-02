@@ -318,7 +318,10 @@ def upgo_loss(neglogp, oldneglogp, mask, values, rewards, discounts,
   else:
     clipped_pg_rhos = ratio
   adv = tf.expand_dims(lambda_return - values[:-1], -1) * clipped_pg_rhos[:-1]
-  loss = tf.reduce_mean(mask[:-1] * tf.stop_gradient(adv) * neglogp[:-1])
+  if mask is None:
+    loss = tf.reduce_mean(tf.stop_gradient(adv) * neglogp[:-1])
+  else:
+    loss = tf.reduce_mean(mask[:-1] * tf.stop_gradient(adv) * neglogp[:-1])
   return loss
 
 
@@ -340,11 +343,17 @@ def vtrace_loss(neglogp, oldneglogp, mask, values, rewards, discounts,
     Vtrace policy gradient loss.
   """
   with tf.device("/cpu:0"):
-    log_ratio = (oldneglogp - neglogp) * mask
+    if mask is None:
+      log_ratio = oldneglogp - neglogp
+    else:
+      log_ratio = (oldneglogp - neglogp) * mask
     adv = vtrace_from_importance_weights(
       log_ratio[:-1], discounts[:-1], rewards[:-1], values[:-1], values[-1],
       clip_rho_threshold=clip_rho_threshold,
       clip_pg_rho_threshold=clip_pg_rho_threshold
     ).pg_advantages
-    loss = tf.reduce_mean(mask[:-1] * tf.stop_gradient(adv) * neglogp[:-1])
+    if mask is None:
+      loss = tf.reduce_mean(tf.stop_gradient(adv) * neglogp[:-1])
+    else:
+      loss = tf.reduce_mean(mask[:-1] * tf.stop_gradient(adv) * neglogp[:-1])
   return loss

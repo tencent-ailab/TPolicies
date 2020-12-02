@@ -35,7 +35,7 @@ def conv_lstm_inputs_test():
 def conv_lstm_test():
   mycfg = {
     'test': False,
-    'use_loss_type': 'rl',
+    'use_loss_type': 'rl_vtrace',
     'use_value_head': True,
     'n_v': 1,
     'sync_statistics': None,
@@ -45,7 +45,8 @@ def conv_lstm_test():
     'nlstm': 64,
     'hs_len': 64 * 2,
     'lstm_layer_norm': True,
-    'weight_decay': 0.0005
+    'weight_decay': 0.0005,
+    'lam': 0.99,
   }
 
   ob_space = spaces.Tuple(
@@ -55,6 +56,7 @@ def conv_lstm_test():
   ac_space = spaces.Tuple([spaces.Discrete(n=6)] * 2)
 
   nc = net_config_cls(ob_space, ac_space, **mycfg)
+  nc.reward_weights = np.ones(shape=nc.reward_weights_shape, dtype=np.float32)
   inputs = net_inputs_placeholders_fun(nc)
   out = net_build_fun(inputs, nc, scope='conv_lstm')
 

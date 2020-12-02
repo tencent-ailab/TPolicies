@@ -279,7 +279,10 @@ def mnet_v6d6_heads(inputs: MNetV6Inputs,
       )
 
     with tf.variable_scope('select'):
-      s_mask = fetch_op(inputs_obs['MASK_SELECTION'], ab_taken)
+      if nc.use_filter_mask:
+        s_mask = inputs_obs['MASK_SELECTION']
+      else:
+        s_mask = fetch_op(inputs_obs['MASK_SELECTION'], ab_taken)
       s_keys = tfc_layers.fully_connected(embed.units_embed.units_embed,
                                           32, activation_fn=None,
                                           scope='selection_raw_keys')
@@ -321,15 +324,21 @@ def mnet_v6d6_heads(inputs: MNetV6Inputs,
         mask = structured_mw['A_CMD_UNIT']
         ind = tf.cast(tf.where(mask), tf.int32)[:, 0]
         gathered_reg_embed = tf.gather(reg_embed, ind)
-        inputs_ptr_mask = tf.gather_nd(
-          inputs_obs['MASK_CMD_UNIT'],
-          tf.stack([ind, tf.gather(ab_taken, ind)], axis=1)
-        )
+        if nc.use_filter_mask:
+          inputs_ptr_mask = tf.gather(inputs_obs['MASK_CMD_UNIT'], ind)
+        else:
+          inputs_ptr_mask = tf.gather_nd(
+            inputs_obs['MASK_CMD_UNIT'],
+            tf.stack([ind, tf.gather(ab_taken, ind)], axis=1)
+          )
         gathered_units_embed = tf.gather(embed.units_embed.units_embed, ind)
         if nc.use_astar_func_embed:
           tar_u_func_embed = tf.gather(tar_u_func_embed, ind)
       else:
-        inputs_ptr_mask = fetch_op(inputs_obs['MASK_CMD_UNIT'], ab_taken)
+        if nc.use_filter_mask:
+          inputs_ptr_mask = inputs_obs['MASK_CMD_UNIT']
+        else:
+          inputs_ptr_mask = fetch_op(inputs_obs['MASK_CMD_UNIT'], ab_taken)
       cmd_u_inputs = _pre_ptr_action_res_block(gathered_reg_embed, nc.enc_dim,
                                                n_blk=1, n_skip=2)
       if nc.use_astar_func_embed:
@@ -372,10 +381,16 @@ def mnet_v6d6_heads(inputs: MNetV6Inputs,
         gathered_reg_embed = tf.gather(reg_embed, ind)
         gathered_map_skip = [tf.gather(map_skip, ind)
                              for map_skip in embed.spa_embed.map_skip]
-        loc_masks = tf.gather_nd(inputs_obs['MASK_CMD_POS'],
-                                 tf.stack([ind, tf.gather(ab_taken, ind)], axis=1))
+        if nc.use_filter_mask:
+          loc_masks = tf.gather(inputs_obs['MASK_CMD_POS'], ind)
+        else:
+          loc_masks = tf.gather_nd(inputs_obs['MASK_CMD_POS'],
+                                   tf.stack([ind, tf.gather(ab_taken, ind)], axis=1))
       else:
-        loc_masks = fetch_op(inputs_obs['MASK_CMD_POS'], ab_taken)
+        if nc.use_filter_mask:
+          loc_masks = inputs_obs['MASK_CMD_POS']
+        else:
+          loc_masks = fetch_op(inputs_obs['MASK_CMD_POS'], ab_taken)
       # pos embedding with shared variables
       with tf.variable_scope('cmd_pos'):
         # TODO: Astar-like pos head

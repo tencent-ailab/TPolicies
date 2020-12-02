@@ -123,6 +123,7 @@ class MNetV6Config(object):
     self.il_multi_label_loss = False
     self.use_astar_glu = False
     self.use_astar_func_embed = False
+    self.use_filter_mask = False
     # sc2 constants
     self.arg_mask = PB2MaskConverter().get_arg_mask()
     # TODO(pengsun): compatible with old version TImitate; remove it later
@@ -249,6 +250,9 @@ class MNetV6Config(object):
       else:
         raise NotImplemented('Unknown lstm_cell_type {}'.format(
           self.lstm_cell_type))
+    if self.use_filter_mask and not self.use_self_fed_heads:
+      logging.warning('filter_mask requires outer_fed_heads or '
+                      'if the policy only outputs lstm hidden state.')
 
     if not self.test:
       assert self.use_self_fed_heads is False, (

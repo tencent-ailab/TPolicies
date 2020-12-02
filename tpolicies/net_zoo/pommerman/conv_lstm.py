@@ -3,7 +3,6 @@ from collections import OrderedDict
 import tensorflow as tf
 import tensorflow.contrib.layers as tfc_layers
 from tensorflow.contrib.layers.python.layers import utils as lutils
-from tensorflow.contrib.framework import arg_scope
 from tensorflow.contrib.framework import add_arg_scope
 from tensorflow.contrib.framework import nest
 
@@ -96,6 +95,8 @@ def conv_lstm_inputs_placeholder(nc: ConvLstmConfig):
   n_v = nc.n_v
   R = tf.placeholder(tf.float32, (nc.batch_size, n_v), 'R')
   V = tf.placeholder(tf.float32, (nc.batch_size, n_v), 'V')
+  r = tf.placeholder(tf.float32, (nc.batch_size, n_v), 'r')
+  discount = tf.placeholder(tf.float32, (nc.batch_size,), 'discount')
   S = tf.placeholder(tf.float32, (nc.batch_size, nc.hs_len), 'hs')
   M = tf.placeholder(tf.float32, (nc.batch_size,), 'hsm')
 
@@ -106,7 +107,9 @@ def conv_lstm_inputs_placeholder(nc: ConvLstmConfig):
     R=R,
     V=V,
     S=S,
-    M=M
+    M=M,
+    r=r,
+    discount=discount,
   )
 
 
@@ -170,6 +173,7 @@ def conv_lstm(inputs: ConvLstmInputs,
     # make value head
     vf = None
     if nc.use_value_head:
+      assert nc.n_player == 2
       with tf.variable_scope('vf'):
         vf = tfc_layers.fully_connected(y, nc.spa_ch_dim * 4)
         vf = tfc_layers.fully_connected(vf, nc.spa_ch_dim * 2)
@@ -177,31 +181,79 @@ def conv_lstm(inputs: ConvLstmInputs,
                                         normalizer_fn=None)
     # make loss
     loss = None
-    if nc.use_loss_type == 'rl':
-      # regularization loss
-      total_reg_loss = tf.losses.get_regularization_losses(scope=sc.name)
+    if nc.use_loss_type in ['rl', 'rl_ppo', 'rl_vtrace']:
+      assert nc.n_player == 2
       with tf.variable_scope('losses'):
-        # ppo loss
-        neglogp = nest.map_structure_up_to(
-          ac_spaces, lambda head, ac: head.pd.neglogp(ac), heads, inputs.A)
-        ppo_loss, value_loss = tp_losses.ppo_loss(
-          neglogp=neglogp,
-          oldneglogp=inputs.neglogp,
-          vpred=vf,
-          R=inputs.R,
-          V=inputs.V,
-          masks=None,
-          reward_weights=None,
-          adv_normalize=True,
-          sync_statistics=nc.sync_statistics
-        )
+        # regularization loss
+        total_reg_loss = tf.losses.get_regularization_losses(scope=sc.name)
         # entropy loss
         entropy_loss = nest.map_structure_up_to(
           ac_spaces, lambda head: tf.reduce_mean(head.ent), heads)
+        # ppo loss
+        neglogp = nest.map_structure_up_to(
+          ac_spaces, lambda head, ac: head.pd.neglogp(ac), heads, inputs.A)
         loss_endpoints = {}
+        for k, v in enumerate(entropy_loss):
+          loss_endpoints['ent_' + str(k)] = v
+        if nc.use_loss_type == 'rl' or nc.use_loss_type == 'rl_ppo':
+          pg_loss, value_loss = tp_losses.ppo_loss(
+            neglogp=neglogp,
+            oldneglogp=inputs.neglogp,
+            vpred=vf,
+            R=inputs.R,
+            V=inputs.V,
+            masks=None,
+            reward_weights=nc.reward_weights,
+            adv_normalize=True,
+            sync_statistics=nc.sync_statistics
+          )
+        elif nc.use_loss_type == 'rl_vtrace':
+          def _batch_to_TB(tsr):
+            return tf.transpose(tf.reshape(
+              tsr, shape=(nc.nrollout, nc.rollout_len)))
+
+          lam = tf.convert_to_tensor(nc.lam, tf.float32)
+          vpred_list = [_batch_to_TB(v)
+                        for v in tf.split(vf, nc.n_v, axis=1)]
+          reward_list = [_batch_to_TB(r)
+                         for r in tf.split(inputs.r, nc.n_v, axis=1)]
+          discounts = _batch_to_TB(inputs.discount)
+          value_loss = []
+          for values, rewards in zip(vpred_list, reward_list):
+            value_loss.append(
+              tp_losses.td_lambda(values, rewards, discounts, lam=lam))
+          value_loss = tf.stack(value_loss)
+
+          neglogp_list = [_batch_to_TB(neglogp)
+                          for neglogp in nest.flatten(neglogp)]
+          oldneglogp_list = [_batch_to_TB(oldneglogp)
+                             for oldneglogp in nest.flatten(inputs.neglogp)]
+          shaped_values = tf.matmul(vf, nc.reward_weights,
+                                    transpose_b=True)
+          shaped_rewards = tf.matmul(inputs.r, nc.reward_weights,
+                                     transpose_b=True)
+          values = tf.transpose(tf.reshape(
+            shaped_values, shape=(nc.nrollout, nc.rollout_len)))
+          rewards = tf.transpose(tf.reshape(
+            shaped_rewards, shape=(nc.nrollout, nc.rollout_len)))
+          pg_loss = tf.reduce_sum(
+            [tp_losses.vtrace_loss(neglogp, oldneglogp, None, values,
+                                   rewards, discounts, 1.0, 1.0)
+             for oldneglogp, neglogp in zip(oldneglogp_list, neglogp_list)])
+          upgo_loss = tp_losses.upgo_loss(tf.stack(neglogp_list, axis=-1),
+                                          tf.stack(oldneglogp_list, axis=-1),
+                                          None, vpred_list[0], reward_list[0],
+                                          discounts)
+          loss_endpoints['upgo_loss'] = upgo_loss
+        loss_endpoints['pg_loss'] = pg_loss
+        if len(value_loss.shape) == 0:
+          loss_endpoints['value_loss'] = value_loss
+        else:
+          for i in range(value_loss.shape[0]):
+            loss_endpoints['value_loss_' + str(i)] = value_loss[i]
         loss = ConvLstmLosses(
           total_reg_loss=total_reg_loss,
-          pg_loss=ppo_loss,
+          pg_loss=pg_loss,
           value_loss=value_loss,
           entropy_loss=entropy_loss,
           loss_endpoints=loss_endpoints
