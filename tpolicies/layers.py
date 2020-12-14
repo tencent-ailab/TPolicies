@@ -1435,8 +1435,17 @@ def to_action_head(inputs_logits, pdtype_cls, temperature=1.0,
   Returns:
     A ActionHead class instance.
   """
-  inputs_logits /= temperature
-  n_actions = inputs_logits.shape[-1]
+  if pdtype_cls == DiagGaussianPdType:
+    n_actions = int(inputs_logits.shape[-1]//2)
+    # logstd -> logstd + 0.5 * log(T)
+    if temperature != 1.0:
+      mean, logstd = tf.split(axis=-1, num_or_size_splits=2,
+                              value=inputs_logits)
+      inputs_logits = tf.concat(
+        [mean, logstd + 0.5 * tf.log(float(temperature))], axis=-1)
+  else:
+    inputs_logits /= temperature
+    n_actions = inputs_logits.shape[-1]
   if pdtype_cls == CategoricalPdType:
     pdtype = pdtype_cls(ncat=n_actions)
   elif pdtype_cls == BernoulliPdType:
@@ -1445,7 +1454,7 @@ def to_action_head(inputs_logits, pdtype_cls, temperature=1.0,
     pdtype = pdtype_cls(nseq=nseq, ncat=n_actions, mask=mask, labels=labels)
     inputs_logits = tf.reshape(inputs_logits, shape=(-1, nseq*n_actions))
   elif pdtype_cls == DiagGaussianPdType:
-    pdtype = pdtype_cls(size=int(n_actions//2))
+    pdtype = pdtype_cls(size=n_actions)
   else:
     raise NotImplemented('Unknown pdtype_cls {}'.format(pdtype_cls))
 

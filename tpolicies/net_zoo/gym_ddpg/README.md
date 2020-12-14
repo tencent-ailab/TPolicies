@@ -1,0 +1,1 @@
+A DDPG algo's net structure.
