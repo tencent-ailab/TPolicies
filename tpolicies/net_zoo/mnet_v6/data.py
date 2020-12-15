@@ -250,7 +250,7 @@ class MNetV6Config(object):
       else:
         raise NotImplemented('Unknown lstm_cell_type {}'.format(
           self.lstm_cell_type))
-    if self.use_filter_mask and not self.use_self_fed_heads:
+    if self.use_filter_mask and self.use_self_fed_heads:
       logging.warning('filter_mask requires outer_fed_heads or '
                       'if the policy only outputs lstm hidden state.')
 
