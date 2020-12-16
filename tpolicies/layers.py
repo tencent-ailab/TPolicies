@@ -9,6 +9,7 @@ from tensorflow.contrib.layers.python.layers import utils as lutils
 from tensorflow.contrib.layers import xavier_initializer
 
 import tpolicies.ops as tp_ops
+from tpolicies import ops as tp_ops
 from tpolicies.ops import INF, cat_sample_from_logits, ortho_init
 from tpolicies.ops import one_step_lstm_op
 from tpolicies.utils.distributions import CategoricalPdType, BernoulliPdType
@@ -2095,3 +2096,70 @@ def dot_prod_attention(values, query, mask):
   res = tf.add_n([tf.multiply(v, tf.expand_dims(ww, axis=-1))
                   for v, ww in zip(values, ws)])  # add_n'n indicates num of values
   return res
+
+
+@add_arg_scope
+def lstm_embed_block(inputs_x, inputs_hs, inputs_mask, nc,
+                     outputs_collections=None):
+  """ lstm embedding block.
+
+  Args
+    inputs_x: current state - (nrollout*rollout_len, input_dim)
+    inputs_hs: hidden state - (nrollout*rollout_len, hs_len), NOTE: it's the
+    states at every time steps of the rollout.
+    inputs_mask: hidden state mask - (nrollout*rollout_len,)
+    nc:
+
+  Returns
+    A Tensor, the lstm embedding outputs - (nrollout*rollout_len, out_idm)
+    A Tensor, the new hidden state - (nrollout, hs_len), NOTE: it's the state at
+     a single time step.
+  """
+  def consist_seq_dropout(input_seq):
+    assert isinstance(input_seq, list)
+    dropout_mask = tf.nn.dropout(tf.ones(shape=[nc.nrollout,
+                                                input_seq[0].shape[-1]],
+                                         dtype=tf.float32),
+                                 keep_prob=1 - nc.lstm_dropout_rate)
+    return [x * dropout_mask for x in input_seq]
+
+  with tf.variable_scope('lstm_embed') as sc:
+    # to list sequence and call the lstm cell
+    x_seq = tp_ops.batch_to_seq(inputs_x, nc.nrollout, nc.rollout_len)
+    # add dropout before LSTM cell TODO(pengsun): use tf.layers.dropout?
+    if 1 > nc.lstm_dropout_rate > 0 and not nc.test:
+      x_seq = consist_seq_dropout(x_seq)
+    hsm_seq = tp_ops.batch_to_seq(tp_ops.to_float32(inputs_mask),
+                                  nc.nrollout, nc.rollout_len)
+    inputs_hs = tf.reshape(inputs_hs, [nc.nrollout, nc.rollout_len, nc.hs_len])
+    initial_hs = inputs_hs[:, 0, :]
+    if nc.lstm_cell_type == 'lstm':
+      lstm_embed, hs_new = tp_layers.lstm(inputs_x_seq=x_seq,
+                                          inputs_terminal_mask_seq=hsm_seq,
+                                          inputs_state=initial_hs,
+                                          nh=nc.nlstm,
+                                          forget_bias=nc.forget_bias,
+                                          use_layer_norm=nc.lstm_layer_norm,
+                                          scope='lstm')
+    elif nc.lstm_cell_type == 'k_lstm':
+      lstm_embed, hs_new = tp_layers.k_lstm(inputs_x_seq=x_seq,
+                                          inputs_termial_mask_seq=hsm_seq,
+                                          inputs_state=initial_hs,
+                                          nh=nc.nlstm,
+                                          k=nc.lstm_duration,
+                                          forget_bias=nc.forget_bias,
+                                          use_layer_norm=nc.lstm_layer_norm,
+                                          scope='k_lstm')
+    else:
+      raise NotImplementedError('unknown cell_type {}'.format(nc.lstm_cell_type))
+
+    # add dropout after LSTM cell
+    if 1 > nc.lstm_dropout_rate > 0 and not nc.test:
+      lstm_embed = consist_seq_dropout(lstm_embed)
+    lstm_embed = tp_ops.seq_to_batch(lstm_embed)
+
+    return (
+      lutils.collect_named_outputs(outputs_collections, sc.name + '_out',
+                                   lstm_embed),
+      lutils.collect_named_outputs(outputs_collections, sc.name + '_hs', hs_new)
+    )

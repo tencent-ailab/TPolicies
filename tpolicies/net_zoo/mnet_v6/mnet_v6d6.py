@@ -21,7 +21,7 @@ from tpolicies.net_zoo.mnet_v6.utils import _make_mnet_v6_arg_scope_a, \
   _scatter_units_block, _spa_embed_block_v2, _vec_embed_block_v2, \
   _vec_embed_block_v2d1, _vec_embed_block_v3, _vec_embed_block_v3d1, \
   _last_action_embed_block_mnet_v6, _last_action_embed_block_mnet_v6_v2, \
-  _zstat_embed, _lstm_embed_block, _pre_discrete_action_res_block, \
+  _zstat_embed, _pre_discrete_action_res_block, \
   _pre_discrete_action_fc_block, _pre_ptr_action_res_block, \
   _pre_loc_action_astar_like_block_v1, _astar_v_oppo_vec_embed_block, \
   _light_lstm_value_block_v2, _light_lstm_value_block_v4, \
@@ -41,7 +41,6 @@ from tpolicies.net_zoo.mnet_v6.data import MNetV6EmbedScope
 from tpolicies.net_zoo.mnet_v6.data import MNetV6Inputs
 from tpolicies.net_zoo.mnet_v6.data import MNetV6Outputs
 from tpolicies.net_zoo.mnet_v6.data import MNetV6Losses
-from tpolicies.net_zoo.mnet_v6.data import MNetV6Config
 
 
 def mnet_v6d6_inputs_placeholders(nc: MNetV6Config):
@@ -580,7 +579,7 @@ def mnet_v6d6_embed(inputs: MNetV6Inputs,
     hs_new = None
     lstm_embed = None
     if nc.use_lstm:
-      lstm_embed, hs_new = _lstm_embed_block(
+      lstm_embed, hs_new = tp_layers.lstm_embed_block(
         inputs_x=int_embed,
         inputs_hs=inputs.S,
         inputs_mask=inputs.M,

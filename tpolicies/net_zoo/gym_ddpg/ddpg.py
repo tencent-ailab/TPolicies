@@ -17,54 +17,6 @@ from tpolicies.net_zoo.gym_ddpg.data import DDPGOutputs
 from tpolicies.net_zoo.gym_ddpg.data import DDPGLosses
 
 
-@add_arg_scope
-def _lstm_embed_block(inputs_x, inputs_hs, inputs_mask, nc,
-                      outputs_collections=None):
-  """ lstm embedding block.
-
-  Args
-    inputs_x: current state - (nrollout*rollout_len, input_dim)
-    inputs_hs: hidden state - (nrollout*rollout_len, hs_len), NOTE: it's the
-    states at every time steps of the rollout.
-    inputs_mask: hidden state mask - (nrollout*rollout_len,)
-    nc:
-
-  Returns
-    A Tensor, the lstm embedding outputs - (nrollout*rollout_len, out_idm)
-    A Tensor, the new hidden state - (nrollout, hs_len), NOTE: it's the state at
-     a single time step.
-  """
-  with tf.variable_scope('lstm_embed') as sc:
-    # add dropout before LSTM cell
-    if 1 > nc.lstm_dropout_rate > 0 and not nc.test:
-      inputs_x = tf.nn.dropout(inputs_x, keep_prob=1 - nc.lstm_dropout_rate)
-
-    # to list sequence and call the lstm cell
-    x_seq = tp_ops.batch_to_seq(inputs_x, nc.nrollout, nc.rollout_len)
-    hsm_seq = tp_ops.batch_to_seq(tp_ops.to_float32(inputs_mask),
-                                  nc.nrollout, nc.rollout_len)
-    inputs_hs = tf.reshape(inputs_hs, [nc.nrollout, nc.rollout_len,
-                                       int(nc.hs_len)])
-    initial_hs = inputs_hs[:, 0, :]
-    lstm_embed, hs_new = tp_layers.lstm(inputs_x_seq=x_seq,
-                                        inputs_terminal_mask_seq=hsm_seq,
-                                        inputs_state=initial_hs,
-                                        nh=nc.nlstm,
-                                        forget_bias=nc.forget_bias,
-                                        use_layer_norm=nc.lstm_layer_norm,
-                                        scope='lstm')
-    lstm_embed = tp_ops.seq_to_batch(lstm_embed)
-
-    # add dropout after LSTM cell
-    if 1 > nc.lstm_dropout_rate > 0 and not nc.test:
-      lstm_embed = tf.nn.dropout(lstm_embed, keep_prob=1 - nc.lstm_dropout_rate)
-    return (
-      lutils.collect_named_outputs(outputs_collections, sc.name + '_out',
-                                   lstm_embed),
-      lutils.collect_named_outputs(outputs_collections, sc.name + '_hs', hs_new)
-    )
-
-
 def _make_vars(scope) -> DDPGTrainableVariables:
   scope = scope if isinstance(scope, str) else scope.name + '/'
   all_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope)
@@ -116,10 +68,8 @@ def gym_ddpg(inputs: DDPGInputs,
       hs = None
       if nc.use_lstm:
         with tf.variable_scope('lstm_embed'):
-          x, hs = _lstm_embed_block(inputs_x=x,
-                                    inputs_hs=inputs.S,
-                                    inputs_mask=inputs.M,
-                                    nc=nc)
+          x, hs = tp_layers.lstm_embed_block(inputs_x=x, inputs_hs=inputs.S,
+                                             inputs_mask=inputs.M, nc=nc)
       # make action head
       with tf.variable_scope('action', reuse=tf.AUTO_REUSE):
         size = ac_space.shape[0]
