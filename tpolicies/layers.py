@@ -2134,22 +2134,22 @@ def lstm_embed_block(inputs_x, inputs_hs, inputs_mask, nc,
     inputs_hs = tf.reshape(inputs_hs, [nc.nrollout, nc.rollout_len, nc.hs_len])
     initial_hs = inputs_hs[:, 0, :]
     if nc.lstm_cell_type == 'lstm':
-      lstm_embed, hs_new = tp_layers.lstm(inputs_x_seq=x_seq,
-                                          inputs_terminal_mask_seq=hsm_seq,
-                                          inputs_state=initial_hs,
-                                          nh=nc.nlstm,
-                                          forget_bias=nc.forget_bias,
-                                          use_layer_norm=nc.lstm_layer_norm,
-                                          scope='lstm')
+      lstm_embed, hs_new = lstm(inputs_x_seq=x_seq,
+                                inputs_terminal_mask_seq=hsm_seq,
+                                inputs_state=initial_hs,
+                                nh=nc.nlstm,
+                                forget_bias=nc.forget_bias,
+                                use_layer_norm=nc.lstm_layer_norm,
+                                scope='lstm')
     elif nc.lstm_cell_type == 'k_lstm':
-      lstm_embed, hs_new = tp_layers.k_lstm(inputs_x_seq=x_seq,
-                                          inputs_termial_mask_seq=hsm_seq,
-                                          inputs_state=initial_hs,
-                                          nh=nc.nlstm,
-                                          k=nc.lstm_duration,
-                                          forget_bias=nc.forget_bias,
-                                          use_layer_norm=nc.lstm_layer_norm,
-                                          scope='k_lstm')
+      lstm_embed, hs_new = k_lstm(inputs_x_seq=x_seq,
+                                  inputs_termial_mask_seq=hsm_seq,
+                                  inputs_state=initial_hs,
+                                  nh=nc.nlstm,
+                                  k=nc.lstm_duration,
+                                  forget_bias=nc.forget_bias,
+                                  use_layer_norm=nc.lstm_layer_norm,
+                                  scope='k_lstm')
     else:
       raise NotImplementedError('unknown cell_type {}'.format(nc.lstm_cell_type))
 
