@@ -26,7 +26,7 @@ def _make_vars(scope) -> ContNNTrainableVariables:
   return ContNNTrainableVariables(all_vars=all_vars, vf_vars=vf_vars, pf_vars=pf_vars)
 
 def cont_nn_inputs_placeholder(nc: ContNNConfig):
-  """create the inputs placeholder for conv_lstm"""
+  """create the inputs placeholder for simple MLPs"""
   X_ph = tp_utils.placeholders_from_gym_space(
     nc.ob_space, batch_size=nc.batch_size, name='ob_ph')
 
@@ -58,7 +58,7 @@ def cont_nn_inputs_placeholder(nc: ContNNConfig):
 def cont_nn(inputs: ContNNInputs,
               nc: ContNNConfig,
               scope=None) -> ContNNOutputs:
-  """create the whole net for conv-lstm"""
+  """create the whole net for simple MLPs"""
   with tf.variable_scope(scope, default_name='soccer') as sc:
     # NOTE: use name_scope, in case multiple parameter-sharing nets are built
     net_name_scope = tf.get_default_graph().get_name_scope()
