@@ -1414,7 +1414,7 @@ def k_lstm(inputs_x_seq: list,
 
 # Action stuff
 ActionHead = namedtuple('ActionHead', [
-  'logits',
+  'flatparam',
   'argmax',
   'sam',  # sampled action
   'neglogp',  # negative log-likelihood, i.e., -log(p)
@@ -1424,12 +1424,12 @@ ActionHead = namedtuple('ActionHead', [
 
 
 @add_arg_scope
-def to_action_head(inputs_logits, pdtype_cls, temperature=1.0,
+def to_action_head(flatparam, pdtype_cls, temperature=1.0,
                    nseq=None, mask=None, labels=None, sample=None, scope=None):
   """Convert logits to ActionHead.
 
   Args:
-    inputs_logits: (batch_size, n_actions)
+    flatparam: (batch_size, pdtype_cls.param_shape())
     pdtype_cls: distribution type
     scope: for tf.variable_scope
 
@@ -1437,30 +1437,30 @@ def to_action_head(inputs_logits, pdtype_cls, temperature=1.0,
     A ActionHead class instance.
   """
   if pdtype_cls == DiagGaussianPdType:
-    n_actions = int(inputs_logits.shape[-1]//2)
+    n_actions = int(flatparam.shape[-1]//2)
     # logstd -> logstd + 0.5 * log(T)
     if temperature != 1.0:
       mean, logstd = tf.split(axis=-1, num_or_size_splits=2,
-                              value=inputs_logits)
-      inputs_logits = tf.concat(
+                              value=flatparam)
+      flatparam = tf.concat(
         [mean, logstd + 0.5 * tf.log(float(temperature))], axis=-1)
   else:
-    inputs_logits /= temperature
-    n_actions = inputs_logits.shape[-1]
+    flatparam /= temperature
+    n_actions = flatparam.shape[-1]
   if pdtype_cls == CategoricalPdType:
     pdtype = pdtype_cls(ncat=n_actions)
   elif pdtype_cls == BernoulliPdType:
     pdtype = pdtype_cls(size=n_actions)
   elif pdtype_cls == MaskSeqCategoricalPdType:
     pdtype = pdtype_cls(nseq=nseq, ncat=n_actions, mask=mask, labels=labels)
-    inputs_logits = tf.reshape(inputs_logits, shape=(-1, nseq*n_actions))
+    flatparam = tf.reshape(flatparam, shape=(-1, nseq*n_actions))
   elif pdtype_cls == DiagGaussianPdType:
     pdtype = pdtype_cls(size=n_actions)
   else:
     raise NotImplemented('Unknown pdtype_cls {}'.format(pdtype_cls))
 
   with tf.variable_scope(scope, default_name='to_action_head'):
-    head_pd = pdtype.pdfromflat(inputs_logits)
+    head_pd = pdtype.pdfromflat(flatparam)
     head_argmax = head_pd.mode()
     # Note(pengsun): we cannot write `head_sam = sample or head_pd.sample()`,
     # as it is interpreted as `Tensor or Tensor` and raises an error
@@ -1470,7 +1470,7 @@ def to_action_head(inputs_logits, pdtype_cls, temperature=1.0,
       head_sam = head_pd.sample()
     head_neglogp = head_pd.neglogp(head_sam)
     head_entropy = head_pd.entropy()
-  return ActionHead(inputs_logits, head_argmax, head_sam, head_neglogp, head_pd,
+  return ActionHead(flatparam, head_argmax, head_sam, head_neglogp, head_pd,
                     head_entropy)
 
 

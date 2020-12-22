@@ -90,7 +90,7 @@ MNetV6Inputs = namedtuple('MNetV6Inputs', [
   'V',  # rl value at X
   'S',  # rnn hidden state
   'M',  # rnn hidden state mask
-  'logits', # logtis from teacher at (X, A)
+  'flatparam', # logtis from teacher at (X, A)
   'r',
   'discount',
 ])

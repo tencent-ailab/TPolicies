@@ -463,7 +463,7 @@ def mnet_v6d6_run_vtrace_loss_test():
         for key in A:
           feed_dict[inputs.A[key]] = [A[key]] * mycfg['batch_size']
           feed_dict[inputs.neglogp[key]] = [0] * mycfg['batch_size']
-          feed_dict[inputs.logits[key]] = np.zeros(shape=inputs.logits[key].shape)
+          feed_dict[inputs.flatparam[key]] = np.zeros(shape=inputs.flatparam[key].shape)
         feed_dict[inputs.r] = [[0] * nc.n_v] * mycfg['batch_size']
         feed_dict[inputs.discount] = [1] * mycfg['batch_size']
         feed_dict[inputs.S] = [np.array([0]*mycfg['hs_len'],
@@ -573,7 +573,7 @@ def mnet_v6d6_run_ppo2_loss_test():
         for key in A:
           feed_dict[inputs.A[key]] = [A[key]] * mycfg['batch_size']
           feed_dict[inputs.neglogp[key]] = [0] * mycfg['batch_size']
-          feed_dict[inputs.logits[key]] = np.zeros(shape=inputs.logits[key].shape)
+          feed_dict[inputs.flatparam[key]] = np.zeros(shape=inputs.flatparam[key].shape)
         feed_dict[inputs.r] = [[0] * nc.n_v] * mycfg['batch_size']
         feed_dict[inputs.discount] = [1] * mycfg['batch_size']
         feed_dict[inputs.S] = [np.array([0]*mycfg['hs_len'],

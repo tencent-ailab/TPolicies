@@ -61,7 +61,6 @@ class CategoricalPdType(PdType):
     def sample_dtype(self):
         return tf.int32
 
-
 class MultiCategoricalPdType(PdType):
     def __init__(self, nvec):
         self.ncats = nvec
@@ -76,7 +75,6 @@ class MultiCategoricalPdType(PdType):
     def sample_dtype(self):
         return tf.int32
 
-
 class MaskSeqCategoricalPdType(PdType):
     def __init__(self, nseq, ncat, mask=None, labels=None):
         self.nseq = nseq
@@ -89,27 +87,11 @@ class MaskSeqCategoricalPdType(PdType):
         logits = tf.reshape(logits, shape=(-1, self.nseq, self.ncat))
         return MaskSeqCategoricalPd(logits, self.mask, self.labels)
     def param_shape(self):
-        return [self.nseq, self.ncat]
+        return [self.nseq * self.ncat]
     def sample_shape(self):
         return [self.nseq]
     def sample_dtype(self):
         return tf.int32
-
-
-class PixelCategoricalPdType(PdType):
-    def __init__(self, w, h, dim):
-        self.w = w
-        self.h = h
-        self.dim = dim
-    def pdclass(self):
-        return PixelCategoricalPd
-    def pdfrompixel(self, pixel_logits):
-        return PixelCategoricalPd(self.w, self.h, self.dim, pixel_logits)
-    def sample_shape(self):
-        return [self.w, self.h]
-    def sample_dtype(self):
-        return tf.int32
-
 
 class DiagGaussianPdType(PdType):
     def __init__(self, size):
@@ -141,58 +123,6 @@ class BernoulliPdType(PdType):
         return [self.size]
     def sample_dtype(self):
         return tf.int32
-
-class TuplePdType(PdType):
-    def __init__(self, pdtype_list):
-        self.pdtype_list = pdtype_list
-        self.size = sum(self.param_shape())
-        self.len = len(self.pdtype_list)
-
-    def pdclass(self):
-        return TuplePd
-
-    def pdfromflat(self, flat):
-        return self.pdclass()(flat, self.pdtype_list,
-                              self.param_shape_list(),
-                              self.sample_shape_list())
-
-    def param_shape_list(self):
-        return [pdtype.param_shape()[0] for pdtype in self.pdtype_list]
-
-    def param_shape(self):
-        return [sum(self.param_shape_list())]
-
-    def sample_shape_list(self):
-        return [1 if not pdtype.sample_shape() else pdtype.sample_shape()[0] for pdtype in self.pdtype_list]
-
-    def sample_shape(self):
-        return [sum(self.sample_shape_list())]
-
-    def sample_dtype(self):
-        return [pdtype.sample_dtype() for pdtype in self.pdtype_list]
-
-# WRONG SECOND DERIVATIVES
-# class CategoricalPd(Pd):
-#     def __init__(self, logits):
-#         self.logits = logits
-#         self.ps = tf.nn.softmax(logits)
-#     @classmethod
-#     def fromflat(cls, flat):
-#         return cls(flat)
-#     def flatparam(self):
-#         return self.logits
-#     def mode(self):
-#         return U.argmax(self.logits, axis=-1)
-#     def logp(self, x):
-#         return -tf.nn.sparse_softmax_cross_entropy_with_logits(self.logits, x)
-#     def kl(self, other):
-#         return tf.nn.softmax_cross_entropy_with_logits(other.logits, self.ps) \
-#                 - tf.nn.softmax_cross_entropy_with_logits(self.logits, self.ps)
-#     def entropy(self):
-#         return tf.nn.softmax_cross_entropy_with_logits(self.logits, self.ps)
-#     def sample(self):
-#         u = tf.random_uniform(tf.shape(self.logits))
-#         return U.argmax(self.logits - tf.log(-tf.log(u)), axis=-1)
 
 class CategoricalPd(Pd):
     def __init__(self, logits):
@@ -256,7 +186,6 @@ class MultiCategoricalPd(Pd):
     def fromflat(cls, flat):
         raise NotImplementedError
 
-
 class MaskSeqCategoricalPd(CategoricalPd):
     def __init__(self, logits, mask=None, labels=None):
         super(MaskSeqCategoricalPd, self).__init__(logits)
@@ -310,31 +239,6 @@ class MaskSeqCategoricalPd(CategoricalPd):
     def fromflat(cls, flat):
         raise NotImplementedError
 
-class PixelCategoricalPd(Pd):
-    def __init__(self, w, h, dim, pixel_logits):
-        self.logits = pixel_logits  # [None, w, h, dim]
-        self.w = w
-        self.h = h
-        self.dim = dim
-        nvec = w * h
-        self.vec_logits = tf.reshape(pixel_logits, [-1, nvec, dim])
-    def neglogp(self, x):
-        x = tf.reshape(x, [-1, self.w * self.h])
-        neglogp = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.vec_logits, labels=x)
-        return tf.reduce_sum(neglogp, axis=-1)
-    def entropy(self):
-        a0 = self.vec_logits - tf.reduce_max(self.vec_logits, axis=-1, keep_dims=True)
-        ea0 = tf.exp(a0)
-        z0 = tf.reduce_sum(ea0, axis=-1, keep_dims=True)
-        p0 = ea0 / z0
-        pixel_sum = tf.reduce_sum(p0 * (tf.log(z0) - a0), axis=-1)
-        return tf.reduce_sum(pixel_sum, axis=-1)
-    def sample(self):
-        return cat_sample_from_logits(self.logits)
-    @classmethod
-    def fromflat(cls, flat):
-        raise NotImplementedError
-
 class DiagGaussianPd(Pd):
     def __init__(self, flat):
         self.flat = flat
@@ -382,30 +286,6 @@ class BernoulliPd(Pd):
     def fromflat(cls, flat):
         return cls(flat)
 
-class TuplePd(Pd):
-    def __init__(self, flat, pdtype_list, param_shape, sample_shape):
-        self.flat = flat
-        self.pdtype_list = pdtype_list
-        self.param_shape = param_shape
-        self.sample_shape = sample_shape
-        self.flat_list = tf.split(self.flat, self.param_shape, axis=-1)
-        self.pd_list = [pdtype.pdfromflat(flat) for pdtype, flat in zip(self.pdtype_list, self.flat_list)]
-    def flatparam(self):
-        return self.flat
-    def neglogp(self, x_list):
-        #x_list = tf.split(x, self.sample_shape, axis=-1)
-        return tuple([pd.neglogp(x) for pd, x in zip(self.pd_list, x_list)])
-    def entropy(self):
-        return tuple([pd.entropy() for pd in self.pd_list])
-    def sample(self):
-        samples = tuple([pd.sample() for pd in self.pd_list])
-        return samples
-    def mode(self):
-        return tuple([pd.mode() for pd in self.pd_list])
-    @classmethod
-    def fromflat(cls, flat):
-        raise NotImplementedError
-
 def make_pdtype(ac_space):
     from gym import spaces
     if isinstance(ac_space, spaces.Box):
@@ -417,14 +297,6 @@ def make_pdtype(ac_space):
         return MultiCategoricalPdType(ac_space.nvec)
     elif isinstance(ac_space, spaces.MultiBinary):
         return BernoulliPdType(ac_space.n)
-    elif isinstance(ac_space, spaces.Tuple):
-        pd_list = []
-        for space in ac_space.spaces:
-            assert (isinstance(space, spaces.Discrete)
-                    or isinstance(space, spaces.MultiDiscrete)
-                    or isinstance(space, spaces.Box))
-            pd_list.append(make_pdtype(space))
-        return TuplePdType(pd_list)
     else:
         raise NotImplementedError
 

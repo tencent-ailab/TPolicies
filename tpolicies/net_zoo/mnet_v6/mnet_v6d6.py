@@ -672,10 +672,10 @@ def mnet_v6d6_loss(inputs: MNetV6Inputs,
             example_ac_sp, lambda head: head.pd, outer_fed_heads)
           distill_loss = tp_losses.distill_loss(
             student_pds=outer_fed_head_pds,
-            teacher_logits=inputs.logits,
+            teacher_logits=inputs.flatparam,
             masks=structured_mw)
           ab_pd = outer_fed_head_pds['A_AB']
-          teacher_logit = inputs.logits['A_AB']
+          teacher_logit = inputs.flatparam['A_AB']
           # TODO: this is from definition of position encoding, remove it?
           first_4mins_mask = tf.cast(
             inputs.X['X_VEC_GAME_PROG'][:, -1] >= np.cos(
