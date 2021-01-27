@@ -201,6 +201,7 @@ class MNetV6Config(object):
     # value head related
     self.n_v = 1
     self.lam = None  # lambda for td-lambda. Maybe used by some rl loss
+    self.use_score_in_value = False
     # loss related settings
     self.merge_pi = True
     self.adv_normalize = True

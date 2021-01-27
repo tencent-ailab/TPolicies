@@ -2051,7 +2051,8 @@ def _v4_value_block(int_embed, n_v, outputs_collections=None):
 
 
 @add_arg_scope
-def _astar_v_oppo_vec_embed_block(inputs, enc_dim, outputs_collections=None):
+def _astar_v_oppo_vec_embed_block(inputs, enc_dim, use_score,
+                                  outputs_collections=None):
   with tf.variable_scope("oppo_vec_enc") as sc:
     x_stat = tfc_layers.fully_connected(inputs['OPPO_X_VEC_PLAYER_STAT'], 64,
                                         scope='x_stat')
@@ -2067,9 +2068,13 @@ def _astar_v_oppo_vec_embed_block(inputs, enc_dim, outputs_collections=None):
                                            scope='x_af_ucnt')
     x_vec_prog = tfc_layers.fully_connected(inputs['OPPO_X_VEC_PROG'], 64,
                                             scope='x_vec_prog')
-
-    vec_embed = tf.concat([x_stat, x_upgrad, x_game_prog, x_s_ucnt,
-                           x_e_ucnt, x_af_ucnt, x_vec_prog], axis=-1)
+    features = [x_stat, x_upgrad, x_game_prog, x_s_ucnt,
+                           x_e_ucnt, x_af_ucnt, x_vec_prog]
+    if use_score:
+      x_vec_score = tfc_layers.fully_connected(inputs['OPPO_X_VEC_SCORE'], 64,
+                                               scope='x_vec_score')
+      features.append(x_vec_score)
+    vec_embed = tf.concat(features, axis=-1)
     vec_embed = tfc_layers.fully_connected(vec_embed, 512, scope='x_fc1')
     vec_embed = tfc_layers.fully_connected(vec_embed, 2 * enc_dim,
                                            scope='x_fc2')
@@ -2334,7 +2339,7 @@ def _light_lstm_value_block_v2(int_embed,
 
 
 @add_arg_scope
-def _light_lstm_value_block_v4(int_embed,
+def _light_lstm_value_block_v4(int_embed, score,
                                z_bo, z_boc, z_bu,
                                c_bo, c_boc, c_bu,
                                upgrades,
@@ -2366,45 +2371,54 @@ def _light_lstm_value_block_v4(int_embed,
       att_tar_bo_h = tp_layers.dot_prod_attention(
         tar_bo_hs, cur_bo_h, mask=tar_z_bo_mask)
 
+  if nc.use_score_in_value:
+    x_vec_score = tfc_layers.fully_connected(score, 64, scope='x_vec_score')
   # winloss value
   with tf.variable_scope('winloss_v'):
-    winloss_v = baseline_connects(
-      features=[],
-      addons=[int_embed, oppo_int_embed,
+    addons = [int_embed, oppo_int_embed,
               tar_bo_h, att_tar_bo_h, cur_bo_h,
               tar_bu_embed, cur_bu_embed,
-              oppo_cur_bo_h, oppo_cur_bu_embed],
-      act_fn=astar_atan_fn)
+              oppo_cur_bo_h, oppo_cur_bu_embed]
+    if nc.use_score_in_value:
+      addons.append(x_vec_score)
+    winloss_v = baseline_connects(
+      features=[], addons=addons, act_fn=astar_atan_fn)
   # bo value
   with tf.variable_scope('bo_v'):
-    bo_v = baseline_connects(features=[],
-                             addons=[int_embed, oppo_int_embed,
-                                     tar_bo_h, att_tar_bo_h, cur_bo_h,
-                                     oppo_cur_bo_h, oppo_cur_bu_embed],
-                             act_fn=None)
+    addons = [int_embed, oppo_int_embed,
+              tar_bo_h, att_tar_bo_h, cur_bo_h,
+              oppo_cur_bo_h, oppo_cur_bu_embed]
+    if nc.use_score_in_value:
+      addons.append(x_vec_score)
+    bo_v = baseline_connects(features=[], addons=addons, act_fn=None)
 
   z_bu_splits = tf.split(z_bu, nc.uc_split_indices, axis=-1)
   c_bu_splits = tf.split(c_bu, nc.uc_split_indices, axis=-1)
   # building_value
   with tf.variable_scope('building_v'):
+    addons = [int_embed, oppo_int_embed,
+              oppo_cur_bo_h, oppo_cur_bu_embed]
+    if nc.use_score_in_value:
+      addons.append(x_vec_score)
     bu_v = baseline_connects(features=[z_bu_splits[0], c_bu_splits[0]],
-                             addons=[int_embed, oppo_int_embed,
-                                     oppo_cur_bo_h, oppo_cur_bu_embed],
-                             act_fn=None)
+                             addons=addons, act_fn=None)
   # effects value
   with tf.variable_scope('effects_v'):
+    addons = [int_embed, oppo_int_embed,
+              oppo_cur_bo_h, oppo_cur_bu_embed]
+    if nc.use_score_in_value:
+      addons.append(x_vec_score)
     effects_v = baseline_connects(
-      features=[z_bu_splits[1], c_bu_splits[1]],
-      addons=[int_embed, oppo_int_embed,
-              oppo_cur_bo_h, oppo_cur_bu_embed],
-      act_fn=None)
+      features=[z_bu_splits[1], c_bu_splits[1]], addons=addons, act_fn=None)
   # upgrades value
   with tf.variable_scope('upgrades_v'):
+    addons = [int_embed, oppo_int_embed,
+              oppo_cur_bo_h, oppo_cur_bu_embed]
+    if nc.use_score_in_value:
+      addons.append(x_vec_score)
     upgrades_v = baseline_connects(
       features=[z_bu_splits[-1], c_bu_splits[-1], upgrades],
-      addons=[int_embed, oppo_int_embed,
-              oppo_cur_bo_h, oppo_cur_bu_embed],
-      act_fn=None)
+      addons=addons, act_fn=None)
   # Notice: the returned value order must keep consistent with that in the reward wrapper
   return lutils.collect_named_outputs(
     outputs_collections, 'vf',

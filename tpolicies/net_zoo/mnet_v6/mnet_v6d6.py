@@ -420,7 +420,8 @@ def mnet_v6d6_value(inputs_embed: MNetV6Embed,
                     scope=None):
   int_embed = inputs_embed.int_embed
   with tf.variable_scope(scope, default_name='mnet_v6d6_vf'):
-    oppo_int_embed = _astar_v_oppo_vec_embed_block(inputs_obs, nc.enc_dim)
+    oppo_int_embed = _astar_v_oppo_vec_embed_block(inputs_obs, nc.enc_dim,
+                                                   nc.use_score_in_value)
     if nc.value_net_version == 'v2':
       return _light_lstm_value_block_v2(
         int_embed=int_embed,
@@ -446,6 +447,7 @@ def mnet_v6d6_value(inputs_embed: MNetV6Embed,
     elif nc.value_net_version == 'v4':
       return _light_lstm_value_block_v4(
         int_embed=int_embed,
+        score=inputs_obs['X_VEC_SCORE'],
         z_bo=inputs_obs['Z_BUILD_ORDER'],
         z_boc=inputs_obs['Z_BUILD_ORDER_COORD'],
         z_bu=inputs_obs['Z_UNIT_COUNT'],
