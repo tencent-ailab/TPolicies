@@ -2075,6 +2075,28 @@ def _astar_v_oppo_vec_embed_block(inputs, enc_dim, outputs_collections=None):
                                            scope='x_fc2')
     return lutils.collect_named_outputs(outputs_collections, sc.name, vec_embed)
 
+def baseline_embed(features):
+  embeds = []
+  for feat in features:
+    embeds.append(tfc_layers.fully_connected(feat, 32))
+  if len(embeds) >= 2:
+    return [tf.concat(embeds, axis=-1)]
+  elif len(embeds) == 1:
+    return embeds
+  else:
+    return []
+
+def astar_atan_fn(features):
+  return (2.0 / 3.1415926) * tf.atan(3.1415926 / 2.0 * features)
+
+def baseline_connects(features, addons, act_fn=None, n_blk=8, n_skip=2, enc_dim=64):
+  com = baseline_embed(features)
+  com = tf.concat(com+addons, axis=-1)
+  com_embed = tp_layers.res_sum_blocks(inputs=com, n_blk=n_blk, n_skip=n_skip,
+                                       enc_dim=enc_dim, layer_norm=True)
+  return tfc_layers.fully_connected(com_embed, 1,
+                                    activation_fn=act_fn,
+                                    normalizer_fn=None)
 
 @add_arg_scope
 def _astar_like_value_block(int_embed,
@@ -2090,22 +2112,6 @@ def _astar_like_value_block(int_embed,
   will only be used in the winloss_v value, since other values are
   self-measured values
   """
-  def baseline_embed(features):
-    embeds = []
-    for feat in features:
-      embeds.append(tfc_layers.fully_connected(feat, 32))
-    return tf.concat(embeds, axis=-1)
-
-  def astar_atan_fn(features):
-    return (2.0 / 3.1415926) * tf.atan(3.1415926 / 2.0 * features)
-
-  def baseline_connects(features, addons, act_fn=None):
-    com = baseline_embed(features)
-    com = tf.concat([com]+addons, axis=-1)
-    com_embed = tp_layers.res_sum_blocks(inputs=com, n_blk=16, n_skip=2, enc_dim=nc.enc_dim)
-    return tfc_layers.fully_connected(com_embed, 1,
-                                      activation_fn=act_fn,
-                                      normalizer_fn=None)
 
   # winloss value
   with tf.variable_scope('winloss_v'):
@@ -2114,18 +2120,19 @@ def _astar_like_value_block(int_embed,
                         tf.layers.flatten(oppo_c_bo), tf.layers.flatten(oppo_c_boc), oppo_c_bu]
     winloss_v = baseline_connects(features=winloss_features,
                                   addons=[int_embed, oppo_int_embed],
-                                  act_fn=astar_atan_fn)
+                                  act_fn=astar_atan_fn,
+                                  n_blk=16, enc_dim=nc.enc_dim)
   # bo value
   with tf.variable_scope('bo_v'):
     bo_v = baseline_connects(features=[tf.layers.flatten(z_bo), tf.layers.flatten(z_boc),
                                        tf.layers.flatten(c_bo), tf.layers.flatten(c_boc)],
                              addons=[],
-                             act_fn=None)
+                             act_fn=None, n_blk=16, enc_dim=nc.enc_dim)
   # bu value
   with tf.variable_scope('bu_v'):
     bu_v = baseline_connects(features=[z_bu, c_bu],
                              addons=[],
-                             act_fn=None)
+                             act_fn=None, n_blk=16, enc_dim=nc.enc_dim)
   # upgrades value
   with tf.variable_scope('upgrades_v'):
     upgrades_v = baseline_connects(
@@ -2133,14 +2140,14 @@ def _astar_like_value_block(int_embed,
                 tf.multiply(c_bu, tf.constant([nc.upgrades_mask], dtype=tf.float32)),
                 upgrades],
       addons=[],
-      act_fn=None)
+      act_fn=None, n_blk=16, enc_dim=nc.enc_dim)
   # effects value
   with tf.variable_scope('effects_v'):
     effects_v = baseline_connects(
       features=[tf.multiply(z_bu, tf.constant(nc.effects_mask, dtype=tf.float32)),
                 tf.multiply(c_bu, tf.constant(nc.effects_mask, dtype=tf.float32))],
       addons=[],
-      act_fn=None)
+      act_fn=None, n_blk=16, enc_dim=nc.enc_dim)
   return lutils.collect_named_outputs(
     outputs_collections, 'vf',
     tf.concat([winloss_v, bo_v, bu_v, upgrades_v, effects_v], axis=-1))
@@ -2161,29 +2168,6 @@ def _light_lstm_value_block(int_embed,
   only some global vector features. Moreover, the (partial) opponent's obs
   is only used by the winloss_v value, since other values are self-measured.
   """
-  def baseline_embed(features):
-    embeds = []
-    for feat in features:
-      embeds.append(tfc_layers.fully_connected(feat, 32))
-    if len(embeds) >= 2:
-      return [tf.concat(embeds, axis=-1)]
-    elif len(embeds) == 1:
-      return embeds
-    else:
-      return []
-
-  def astar_atan_fn(features):
-    return (2.0 / 3.1415926) * tf.atan(3.1415926 / 2.0 * features)
-
-  def baseline_connects(features, addons, act_fn=None):
-    com = baseline_embed(features)
-    com = tf.concat(com+addons, axis=-1)
-    com_embed = tp_layers.res_sum_blocks(inputs=com, n_blk=8, n_skip=2,
-                                         enc_dim=64, layer_norm=True)
-    return tfc_layers.fully_connected(com_embed, 1,
-                                      activation_fn=act_fn,
-                                      normalizer_fn=None)
-
   # shared zstat embeddings
   with tf.variable_scope('shared'):
     with tf.variable_scope('v_zstat', reuse=False):
@@ -2255,34 +2239,11 @@ def _light_lstm_value_block_v2(int_embed,
                                upgrades,
                                oppo_int_embed,
                                oppo_c_bo, oppo_c_boc, oppo_c_bobt, oppo_c_bocbt, oppo_c_bu,
-                               nc, outputs_collections=None):
+                               nc, use_creep_value=False, outputs_collections=None):
   """AlphaStar-like centralized value, version 2.
 
   Almost the same with v1, except that v2 includes more zstat channels.
   """
-  def baseline_embed(features):
-    embeds = []
-    for feat in features:
-      embeds.append(tfc_layers.fully_connected(feat, 32))
-    if len(embeds) >= 2:
-      return [tf.concat(embeds, axis=-1)]
-    elif len(embeds) == 1:
-      return embeds
-    else:
-      return []
-
-  def astar_atan_fn(features):
-    return (2.0 / 3.1415926) * tf.atan(3.1415926 / 2.0 * features)
-
-  def baseline_connects(features, addons, act_fn=None):
-    com = baseline_embed(features)
-    com = tf.concat(com+addons, axis=-1)
-    com_embed = tp_layers.res_sum_blocks(inputs=com, n_blk=8, n_skip=2,
-                                         enc_dim=64, layer_norm=True)
-    return tfc_layers.fully_connected(com_embed, 1,
-                                      activation_fn=act_fn,
-                                      normalizer_fn=None)
-
   # shared zstat embeddings
   with tf.variable_scope('shared'):
     with tf.variable_scope('v_zstat', reuse=False):
@@ -2357,133 +2318,19 @@ def _light_lstm_value_block_v2(int_embed,
       addons=[int_embed, oppo_int_embed,
               oppo_cur_bo_h, oppo_cur_bobt_h, oppo_cur_bu_embed],
       act_fn=None)
+  values = [winloss_v, bo_v, bobt_v, bu_v, effects_v, upgrades_v]
+  if use_creep_value:
+    # tumor creep value
+    with tf.variable_scope('tumor_creep_v'):
+      tumor_creep_v = baseline_connects(
+        features=[],
+        addons=[int_embed, oppo_int_embed,
+                oppo_cur_bo_h, oppo_cur_bobt_h, oppo_cur_bu_embed],
+        act_fn=None)
+      values.append(tumor_creep_v)
   # Notice: the returned value order must keep consistent with that in the reward wrapper
   return lutils.collect_named_outputs(
-    outputs_collections, 'vf',
-    tf.concat([winloss_v, bo_v, bobt_v, bu_v, effects_v, upgrades_v], axis=-1))
-
-
-@add_arg_scope
-def _light_lstm_value_block_v3(int_embed,
-                               z_bo, z_boc, z_bobt, z_bocbt, z_bu,
-                               c_bo, c_boc, c_bobt, c_bocbt, c_bu,
-                               upgrades,
-                               oppo_int_embed,
-                               oppo_c_bo, oppo_c_boc, oppo_c_bobt, oppo_c_bocbt, oppo_c_bu,
-                               nc, outputs_collections=None):
-  """AlphaStar-like centralized value, version 3.
-
-  The same with v2 except for one more tumor creep value.
-  """
-  def baseline_embed(features):
-    embeds = []
-    for feat in features:
-      embeds.append(tfc_layers.fully_connected(feat, 32))
-    if len(embeds) >= 2:
-      return [tf.concat(embeds, axis=-1)]
-    elif len(embeds) == 1:
-      return embeds
-    else:
-      return []
-
-  def astar_atan_fn(features):
-    return (2.0 / 3.1415926) * tf.atan(3.1415926 / 2.0 * features)
-
-  def baseline_connects(features, addons, act_fn=None):
-    com = baseline_embed(features)
-    com = tf.concat(com+addons, axis=-1)
-    com_embed = tp_layers.res_sum_blocks(inputs=com, n_blk=8, n_skip=2,
-                                         enc_dim=64, layer_norm=True)
-    return tfc_layers.fully_connected(com_embed, 1,
-                                      activation_fn=act_fn,
-                                      normalizer_fn=None)
-
-  # shared zstat embeddings
-  with tf.variable_scope('shared'):
-    with tf.variable_scope('v_zstat', reuse=False):
-      tar_bo_hs, tar_bo_h, tar_bobt_hs, tar_bobt_h, tar_bu_embed = _zstat_connections_v2(
-        z_bo, z_boc, z_bobt, z_bocbt, z_bu, nc, use_ln=True)
-    with tf.variable_scope('v_zstat', reuse=tf.AUTO_REUSE):
-      _, cur_bo_h, _, cur_bobt_h, cur_bu_embed = _zstat_connections_v2(
-        c_bo, c_boc, c_bobt, c_bocbt, c_bu, nc, use_ln=True)
-    with tf.variable_scope('v_zstat', reuse=tf.AUTO_REUSE):
-      _, oppo_cur_bo_h, _, oppo_cur_bobt_h, oppo_cur_bu_embed = _zstat_connections_v2(
-        oppo_c_bo, oppo_c_boc, oppo_c_bobt, oppo_c_bocbt, oppo_c_bu, nc, use_ln=True)
-    # attention layer output
-    with tf.variable_scope('v_att_tar_bo'):
-      idx = tf.cast(tf.reduce_sum(z_bo, [1, 2]), tf.int32)  # [bs,]
-      tar_z_bo_mask = tf.less_equal(
-        tf.stack([tf.range(len(tar_bo_hs))] * nc.batch_size, axis=0),
-        tf.expand_dims(tf.maximum(idx-1, 0), axis=-1))
-      att_tar_bo_h = tp_layers.dot_prod_attention(
-        tar_bo_hs, cur_bo_h, mask=tar_z_bo_mask)
-    with tf.variable_scope('v_att_tar_bobt'):
-      idx = tf.cast(tf.reduce_sum(z_bobt, [1, 2]), tf.int32)  # [bs,]
-      tar_z_bobt_mask = tf.less_equal(
-        tf.stack([tf.range(len(tar_bobt_hs))] * nc.batch_size, axis=0),
-        tf.expand_dims(tf.maximum(idx-1, 0), axis=-1))
-      att_tar_bobt_h = tp_layers.dot_prod_attention(
-        tar_bobt_hs, cur_bobt_h, mask=tar_z_bobt_mask)
-
-  # winloss value
-  with tf.variable_scope('winloss_v'):
-    winloss_v = baseline_connects(
-      features=[],
-      addons=[int_embed, oppo_int_embed,
-              tar_bo_h, att_tar_bo_h, cur_bo_h,
-              tar_bobt_h, att_tar_bobt_h, cur_bobt_h,
-              tar_bu_embed, cur_bu_embed,
-              oppo_cur_bo_h, oppo_cur_bobt_h, oppo_cur_bu_embed],
-      act_fn=astar_atan_fn)
-  # bo value
-  with tf.variable_scope('bo_v'):
-    bo_v = baseline_connects(features=[],
-                             addons=[int_embed, oppo_int_embed,
-                                     tar_bo_h, att_tar_bo_h, cur_bo_h,
-                                     oppo_cur_bo_h, oppo_cur_bobt_h, oppo_cur_bu_embed],
-                             act_fn=None)
-  # bobt value
-  with tf.variable_scope('bobt_v'):
-    bobt_v = baseline_connects(features=[],
-                               addons=[int_embed, oppo_int_embed,
-                                       tar_bobt_h, att_tar_bobt_h, cur_bobt_h,
-                                       oppo_cur_bo_h, oppo_cur_bobt_h, oppo_cur_bu_embed],
-                               act_fn=None)
-
-  z_bu_splits = tf.split(z_bu, nc.uc_split_indices, axis=-1)
-  c_bu_splits = tf.split(c_bu, nc.uc_split_indices, axis=-1)
-  # building_value
-  with tf.variable_scope('building_v'):
-    bu_v = baseline_connects(features=[z_bu_splits[0], c_bu_splits[0]],
-                             addons=[int_embed, oppo_int_embed,
-                                     oppo_cur_bo_h, oppo_cur_bobt_h, oppo_cur_bu_embed],
-                             act_fn=None)
-  # effects value
-  with tf.variable_scope('effects_v'):
-    effects_v = baseline_connects(
-      features=[z_bu_splits[1], c_bu_splits[1]],
-      addons=[int_embed, oppo_int_embed,
-              oppo_cur_bo_h, oppo_cur_bobt_h, oppo_cur_bu_embed],
-      act_fn=None)
-  # upgrades value
-  with tf.variable_scope('upgrades_v'):
-    upgrades_v = baseline_connects(
-      features=[z_bu_splits[-1], c_bu_splits[-1], upgrades],
-      addons=[int_embed, oppo_int_embed,
-              oppo_cur_bo_h, oppo_cur_bobt_h, oppo_cur_bu_embed],
-      act_fn=None)
-  # tumor creep value
-  with tf.variable_scope('tumor_creep_v'):
-    tumor_creep_v = baseline_connects(
-      features=[],
-      addons=[int_embed, oppo_int_embed,
-              oppo_cur_bo_h, oppo_cur_bobt_h, oppo_cur_bu_embed],
-      act_fn=None)
-  # Notice: the returned value order must keep consistent with that in the reward wrapper
-  return lutils.collect_named_outputs(
-    outputs_collections, 'vf',
-    tf.concat([winloss_v, bo_v, bobt_v, bu_v,
-               effects_v, upgrades_v, tumor_creep_v], axis=-1))
+    outputs_collections, 'vf', tf.concat(values, axis=-1))
 
 
 @add_arg_scope
@@ -2498,28 +2345,6 @@ def _light_lstm_value_block_v4(int_embed,
 
   Almost the same with v2, except that bobt is removed.
   """
-  def baseline_embed(features):
-    embeds = []
-    for feat in features:
-      embeds.append(tfc_layers.fully_connected(feat, 32))
-    if len(embeds) >= 2:
-      return [tf.concat(embeds, axis=-1)]
-    elif len(embeds) == 1:
-      return embeds
-    else:
-      return []
-
-  def astar_atan_fn(features):
-    return (2.0 / 3.1415926) * tf.atan(3.1415926 / 2.0 * features)
-
-  def baseline_connects(features, addons, act_fn=None):
-    com = baseline_embed(features)
-    com = tf.concat(com+addons, axis=-1)
-    com_embed = tp_layers.res_sum_blocks(inputs=com, n_blk=8, n_skip=2,
-                                         enc_dim=64, layer_norm=True)
-    return tfc_layers.fully_connected(com_embed, 1,
-                                      activation_fn=act_fn,
-                                      normalizer_fn=None)
 
   # shared zstat embeddings
   with tf.variable_scope('shared'):
@@ -2598,29 +2423,6 @@ def _light_trans_value_block_v1(int_embed,
 
   Based on v4, while it use the way the bo and bu connects in _zstat_embed_block_v4d1.
   """
-  def baseline_embed(features):
-    embeds = []
-    for feat in features:
-      embeds.append(tfc_layers.fully_connected(feat, 32))
-    if len(embeds) >= 2:
-      return [tf.concat(embeds, axis=-1)]
-    elif len(embeds) == 1:
-      return embeds
-    else:
-      return []
-
-  def astar_atan_fn(features):
-    return (2.0 / 3.1415926) * tf.atan(3.1415926 / 2.0 * features)
-
-  def baseline_connects(features, addons, act_fn=None):
-    com = baseline_embed(features)
-    com = tf.concat(com+addons, axis=-1)
-    com_embed = tp_layers.res_sum_blocks(inputs=com, n_blk=8, n_skip=2,
-                                         enc_dim=64, layer_norm=True)
-    return tfc_layers.fully_connected(com_embed, 1,
-                                      activation_fn=act_fn,
-                                      normalizer_fn=None)
-
   # shared zstat embeddings
   with tf.variable_scope('shared'):
     with tf.variable_scope('v_zstat', reuse=False):
