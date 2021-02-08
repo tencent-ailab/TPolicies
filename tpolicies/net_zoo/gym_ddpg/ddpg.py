@@ -64,7 +64,6 @@ def gym_ddpg(inputs: DDPGInputs,
     # make body
     with tf.variable_scope('body'):
       x = tfc_layers.fully_connected(X, nc.fc_ch_dim, scope='fc0')
-      x = tfc_layers.fully_connected(x, nc.fc_ch_dim, scope='fc1')
       hs = None
       if nc.use_lstm:
         with tf.variable_scope('lstm_embed'):
@@ -74,42 +73,42 @@ def gym_ddpg(inputs: DDPGInputs,
       with tf.variable_scope('action', reuse=tf.AUTO_REUSE):
         size = ac_space.shape[0]
         mean = tfc_layers.fully_connected(x, size,
-                                          activation_fn=None,
+                                          activation_fn=tf.tanh,
                                           normalizer_fn=None,
                                           scope='mean',)
+        mean = (ac_space.high + ac_space.low) * 0.5 + mean * (ac_space.high - ac_space.low) * 0.5
         logstd = tf.get_variable(name='logstd', shape=[1, size],
                                  initializer=tf.zeros_initializer())
         pdparam = tf.concat([mean, mean * 0.0 + logstd], axis=1)
         head = tp_layers.to_action_head(pdparam, DiagGaussianPdType)
+        head = head._replace(sam=tf.clip_by_value(head.sam, ac_space.low, ac_space.high))
     # make value head
     self_vf = None
     outer_vf = None
     if nc.use_value_head:
       with tf.variable_scope('vf'):
         self_vf = tfc_layers.fully_connected(
-          tf.concat([x, head.argmax], axis=-1), nc.fc_ch_dim)
-        self_vf = tfc_layers.fully_connected(self_vf, nc.fc_ch_dim * 2)
+          tf.concat([X, head.argmax], axis=-1), nc.fc_ch_dim)
         self_vf = tfc_layers.fully_connected(self_vf, nc.n_v,
                                              activation_fn=None,
                                              normalizer_fn=None)
       with tf.variable_scope('vf', reuse=tf.AUTO_REUSE):
         outer_vf = tfc_layers.fully_connected(
-          tf.concat([x, inputs.A], axis=-1), nc.fc_ch_dim)
-        outer_vf = tfc_layers.fully_connected(outer_vf, nc.fc_ch_dim * 2)
+          tf.concat([X, inputs.A], axis=-1), nc.fc_ch_dim)
         outer_vf = tfc_layers.fully_connected(outer_vf, nc.n_v,
                                               activation_fn=None,
                                               normalizer_fn=None)
-    return head, self_vf, outer_vf, hs
+    return head, self_vf, outer_vf, hs, logstd
 
   with tf.variable_scope(scope, default_name='gym_ddpg') as sc:
     # NOTE: use name_scope, in case multiple parameter-sharing nets are built
-    head, self_vf, outer_vf, hs = build_ac()
+    head, self_vf, outer_vf, hs, logstd = build_ac()
     # collect vars, endpoints, etc.
     trainable_vars = _make_vars(sc)
 
   if nc.use_target_net:
     with tf.variable_scope('target_model') as sc:
-      _, target_vf, _, _ = build_ac()
+      _, target_vf, _, _, _ = build_ac()
 
   # make loss
   loss = None
@@ -143,8 +142,9 @@ def gym_ddpg(inputs: DDPGInputs,
       if nc.reward_weights is not None:
         self_vf = tf.matmul(self_vf, nc.reward_weights,
                             transpose_b=True)
-      pg_loss = tf.reduce_sum(self_vf)
+      pg_loss = - tf.reduce_mean(self_vf)
       loss_endpoints['pg_loss'] = pg_loss
+      loss_endpoints['std'] = tf.exp(logstd)
       if len(value_loss.shape) == 0:
         loss_endpoints['value_loss'] = value_loss
       else:

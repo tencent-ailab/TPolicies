@@ -54,7 +54,7 @@ class DDPGConfig(object):
     self.n_v = 1
     self.lam = None
     # common embedding settings
-    self.fc_ch_dim = 64
+    self.fc_ch_dim = 32
     # lstm settings
     self.n_player = 2
     self.nrollout = None
