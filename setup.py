@@ -7,7 +7,7 @@ from setuptools import setup
 
 setup(
     name='TPolicies',
-    version='1.2',
+    version='1.3',
     description='Tencent Policies Library for Various IL & RL Applications',
     keywords='Policies',
     packages=[
