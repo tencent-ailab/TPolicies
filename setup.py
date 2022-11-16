@@ -17,6 +17,6 @@ setup(
       # 'tensorflow',
       'numpy',
       'joblib',
-      'gym==0.12.1'
+      #'gym==0.12.1' using custom derivation from 0.12.1
     ]
 )
