@@ -191,9 +191,9 @@ def ppo_loss(neglogp, oldneglogp, vpred, R, V, masks=None, reward_weights=None,
     import horovod.tensorflow as hvd
     batch_mean = hvd.allreduce(batch_mean, average=True)
     batch_mean_square = hvd.allreduce(batch_mean_square, average=True)
-  adv = adv - batch_mean
   if adv_normalize:
-    adv = adv / tf.sqrt(batch_mean_square + 1e-8)
+    batch_var = batch_mean_square - tf.square(batch_mean)
+    adv = (adv - batch_mean) / tf.sqrt(batch_var + 1e-8)
 
   vpredclipped = V + tf.clip_by_value(vpred - V, - clip_range, clip_range)
   vf_losses1 = tf.square(vpred - R)
@@ -256,9 +256,9 @@ def ppo2_loss(neglogp, oldneglogp, vpred, R, mask=None, adv_normalize=True,
     import horovod.tensorflow as hvd
     batch_mean = hvd.allreduce(batch_mean, average=True)
     batch_mean_square = hvd.allreduce(batch_mean_square, average=True)
-  adv = adv - batch_mean
   if adv_normalize:
-    adv = adv / tf.sqrt(batch_mean_square + 1e-8)
+    batch_var = batch_mean_square - tf.square(batch_mean)
+    adv = (adv - batch_mean) / tf.sqrt(batch_var + 1e-8)
 
   # the ppo policy gradient loss
   pg_losses1 = -adv * ratio
